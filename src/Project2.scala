@@ -3,23 +3,37 @@ import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.ActorRef
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 object Project2 {
+
+  val gossip = "gossip"
+  val pushsum = "push-sum"
+  val line = "line"
+  val threed = "3d"
+  val full = "full"
+  val imp3d = "imp3d"
 
   sealed trait Seal
   case class setNeighbours(neighs: Array[Int]) extends Seal
   case class printNeighbours() extends Seal
   case class printName() extends Seal
-  case class sendMessage() extends Seal
+  case class pushsumMsg() extends Seal
+  case class gossipMsg(rumour: String) extends Seal
   case class startGossip() extends Seal
-  case class recieveMessage() extends Seal
+
+  var actors = new ArrayBuffer[ActorRef]()
+  var convergedActors = new ArrayBuffer[ActorRef]()
+  val actorsMap = new collection.mutable.HashMap[String, Int]
 
   val actorNamePrefix = "tarun"
+  val maxGossipCount = 50
+  var startTime = System.currentTimeMillis()
 
   def main(args: Array[String]): Unit = {
 
-    var numNodes = 10
-    var topology = "Line"
+    var numNodes = 20
+    var topology = line
     var algo = "gossip"
 
     if (args.length > 0) {
@@ -35,17 +49,15 @@ object Project2 {
     val system = ActorSystem("ActorSys")
     val namingPrefix: String = "akka://ActorSys/"
 
-    var actors = new ArrayBuffer[ActorRef]()
-
     printf("\nCreating %d actors in %s topology", numNodes, topology)
 
-    for (i <- 1 to numNodes) {
-      var actor = system.actorOf(Props(new ActorNode(namingPrefix)), actorNamePrefix + i);
+    for (i <- 0 to numNodes - 1) {
+      var actor = system.actorOf(Props(new ActorNode(namingPrefix, algo, topology)), actorNamePrefix + i);
 
-      if (topology.equals("Line")) {
+      if (topology.equals(line)) {
         var neighs = new Array[Int](2)
-        neighs = if (i == 1) Array(2)
-        else if (i == numNodes) Array(i - 1)
+        neighs = if (i == 0) Array(1)
+        else if (i == numNodes - 1) Array(i - 1)
         else Array(i - 1, i + 1)
         actor ! setNeighbours(neighs);
       }
@@ -55,46 +67,68 @@ object Project2 {
     }
     printf("\nCreated %d actors in %s topology", actors.length, topology)
 
-    //for (i <- 0 to actors.length - 1) {
+    printf("Build topology time taken : " + (System.currentTimeMillis() - startTime))
+    startTime = System.currentTimeMillis();
 
-    var actorRef = actors(5)
+    var actorRef = actors(1)
     println(">>>>" + actorRef.path.name)
     actorRef ! printNeighbours()
-    actorRef ! sendMessage()
-    //}
+    actorRef ! gossipMsg("Fire in the hole!!")
 
   }
 
-  def startPoint(): Unit = {
-    println("Hello world")
-  }
+  class ActorNode(namingPrefix: String, algo: String, topology: String) extends Actor {
 
-  class ActorNode(namingPrefix: String) extends Actor {
-
-    var neighbours = Array[Int]()
+    var alphaNeighs = Array[Int]()
+    var currentIndex = 0
+    var gossipCount = 0
+    var rumour = "";
 
     def receive = {
       case n: setNeighbours => {
-        neighbours = n.neighs;
+        alphaNeighs = n.neighs
+        println("Neigh length : " + n.neighs.length + " alpha length : " + alphaNeighs.length)
+        actorsMap += (self.path.name -> 0)
       }
-      case pname: printName => print("##" + self.path.name)
+      case pname: printName => {
+        print("##" + self.path.name)
+      }
       case pn: printNeighbours => {
         println("My name : " + self.path.name)
         print("and my neighbours are ")
-        for (i <- 0 to neighbours.length - 1) {
-          val p = context.actorSelection(namingPrefix + "user/" +  actorNamePrefix + neighbours(i));
-          println("\n" + p.pathString)
-          p.tell(printName(),self)
+        for (i <- 0 to alphaNeighs.length - 1) {
+          val p = context.actorSelection(namingPrefix + "user/" + actorNamePrefix + alphaNeighs(i));
+          p.tell(printName(), self)
         }
       }
-      case s: sendMessage => {
-       // neighbours(0) ! recieveMessage()
-        //neighbours(1) ! recieveMessage()
-        
+      case r: gossipMsg => {
+        gossipCount += 1
+        if (gossipCount <= maxGossipCount) {
+          printf("\nReceived message %s for the count : %d", self.path.name, gossipCount)
+
+          actorsMap(self.path.name) = gossipCount
+          rumour = r.rumour
+          if (topology.equals(line)) {
+            //          var neighbour = actors(alphaNeighs(currentIndex % alphaNeighs.length))
+            var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
+            currentIndex = currentIndex + 1;
+            neighbour ! gossipMsg(rumour)
+          }
+
+          if (gossipCount == maxGossipCount) {
+            convergedActors.append(self)
+            if (convergedActors.length >= (actors.length / 2) - 1) {
+              terminate()
+              context.system.shutdown()
+            }
+          }
+
+        } else {
+          printf("\nConverged message %s for the count : %d", self.path.name, gossipCount)
+          println(actorsMap.toString())
+        }
       }
-      case r: recieveMessage => {
-          println("recieved message: " +self.path.name);
-      }
+
       case x: String => {
         if (x != self.path.name) {
           print(self.path.name + "called by " + x);
@@ -105,6 +139,11 @@ object Project2 {
         }
       }
     }
+  }
+
+  def terminate(): Unit = {
+    println("Time taken for protocol to converge : " + (System.currentTimeMillis() - startTime))
+    println(actorsMap.toString())
   }
 
 }
