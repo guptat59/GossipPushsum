@@ -14,7 +14,7 @@ object Project2 {
   val threeD = "3d"
   val full = "full"
   val imp3D = "imp3d"
-
+  
   sealed trait Seal
   case class setNeighbours(neighs: Array[Int]) extends Seal
   case class pushsumMsg(s: Double, w: Double) extends Seal
@@ -24,12 +24,13 @@ object Project2 {
 
   var actors = new ArrayBuffer[ActorRef]()
   var convergedActors = new ArrayBuffer[ActorRef]()
+  var coOrdinates:Map[Int,Array[Int]]= Map();
   val actorsMap = new collection.mutable.HashMap[String, Int]
 
   val actorNamePrefix = "tarun"
   val defaultSum = 10.0
   val maxGossipCount = 200
-  var randActorIndex = 13
+  var randActorIndex = 17
   var startTime = System.currentTimeMillis()
 
   val printName = "printName"
@@ -42,9 +43,9 @@ object Project2 {
     var topology = line
     topology = full
     topology = threeD
-    topology = imp3D
+   // topology = imp3D
     var algo = gossip
-    algo = pushsum
+    //algo = pushsum
 
     if (args.length > 0) {
       numNodes = args(0).toInt
@@ -124,48 +125,64 @@ object Project2 {
     x
   }
 
-  def getNeighboursIn3d(numNodes: Int, ind: Int): ArrayBuffer[Int] = {
-
-    var index = ind + 1
+  def getNeighboursIn3d(numNodes: Int, value: Int): ArrayBuffer[Int] = {
+  
     var n = math.ceil(math.pow(numNodes.toDouble, 1.0 / 3.0)).toInt
-    var nsquare = (math.pow(n, 2)).toInt
-
+    var A = construct3DGrid(n)
+    var index = coOrdinates.get(value);
+    var i = index.get(0)
+    var j = index.get(1)
+    var k = index.get(2)
+    
     var neighs = new ArrayBuffer[Int]()
-
-    var isLeft = (((index % nsquare) % n == 1));
-    var isRight = ((index % nsquare) % n == 0);
-    var isFront = ((index / nsquare) == 0)
-    var isBottom = ((((((index % nsquare) / n).toInt == n - 1) && ((index % nsquare) % n).toInt > 0)) || (index % nsquare) == 0)
-    var isTop = (((index % nsquare) / n == 0) && ((index % nsquare) % n > 0)) || ((index % nsquare) == n)
-    var isBack = (((index / nsquare) == n - 1) && ((index % nsquare) > 0))
-
-    var range = 1 until (math.pow(n, 3) + 1).toInt
-    // Left neighbor
-    if (!isLeft && (range contains index - 1)) neighs += (index - 1)
-    // Right neighbor
-    if (!isRight && (range contains index + 1)) neighs += (index + 1)
-    // Top neighbor
-    if (!isTop && (range contains index - n)) neighs += (index - n)
-    // Bottom neighbor
-    if (!isBottom && (range contains index + n)) neighs += (index + n)
-    // Front neighbor
-    if (!isFront) {
-      var front = (index - math.pow(n, 2)).toInt
-      if (range contains front) neighs += (front)
+    
+    if(i+1 < n)
+    {
+      neighs.append(A(i+1)(j)(k));
     }
-    // Back neighbor
-    if (!isBack) {
-      var back = (index + math.pow(n, 2)).toInt
-      if (range contains back) neighs += (back)
+    if(i-1 > -1 )
+    {
+      neighs.append(A(i-1)(j)(k));
     }
-    // println("\n Index " + index + "Neighs " + neighs)
-
-    for (j <- 0 to neighs.size - 1) {
-      neighs(j) = neighs(j) - 1
+    if(j+1 < n )
+    {
+      neighs.append(A(i)(j+1)(k));
+    }
+    if(j-1 > -1 )
+    {
+      neighs.append(A(i)(j-1)(k));
+    }
+    if(k+1 < n )
+    {
+      neighs.append(A(i)(j)(k+1));
+    }
+    if(k-1 > -1 )
+    {
+      neighs.append(A(i)(j)(k-1));
     }
     neighs
   }
 
+  def construct3DGrid(n: Int): Array[Array[Array[Int]]] = {
+    
+    var A = Array.ofDim[Int](n,n,n);
+    
+    var count = 0;
+    for( i <- 0 to n-1)
+    {
+      for(j <- 0 to n-1 )
+      {
+        for(k <- 0 to n-1)
+        {
+          A(i)(j)(k) = count
+          var arr = Array(i,j,k)
+          coOrdinates += (count -> arr)
+          count = count + 1
+        }
+      }
+    }
+    A
+  }
   class ActorNode(namingPrefix: String, algo: String, topology: String) extends Actor {
 
     var alphaNeighs = Array[Int]()
@@ -190,7 +207,7 @@ object Project2 {
       case r: gossipMsg => {
         gossipCount += 1
         if (gossipCount <= maxGossipCount) {
-          printf("Received message %s for the count : %d from : %s ", self.path.name, gossipCount, sender.path.name)
+          printf("\n Received message %s for the count : %d from : %s ", self.path.name, gossipCount, sender.path.name)
 
           actorsMap(self.path.name) = gossipCount
           rumour = r.rumour
@@ -247,7 +264,7 @@ object Project2 {
           print("##" + self.path.name)
         } else if (x.equals(printNeighbours)) {
 
-          println("My name : " + self.path.name)
+          println("\nMy name : " + self.path.name)
           print("and my neighbours are ")
           for (i <- 0 to alphaNeighs.length - 1) {
             val p = context.actorSelection(namingPrefix + "user/" + actorNamePrefix + alphaNeighs(i));
