@@ -4,15 +4,16 @@ import akka.actor.Props
 import akka.actor.ActorRef
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
+import scala.Array._
 
 object Project2 {
 
   val gossip = "gossip"
   val pushsum = "push-sum"
   val line = "line"
-  val threed = "3d"
+  val threeD = "3d"
   val full = "full"
-  val imp3d = "imp3d"
+  val imp3D = "imp3d"
 
   sealed trait Seal
   case class setNeighbours(neighs: Array[Int]) extends Seal
@@ -27,13 +28,16 @@ object Project2 {
   val actorsMap = new collection.mutable.HashMap[String, Int]
 
   val actorNamePrefix = "tarun"
-  val maxGossipCount = 50
+  val maxGossipCount = 200
+  var randActorIndex = 13
   var startTime = System.currentTimeMillis()
 
   def main(args: Array[String]): Unit = {
 
     var numNodes = 20
     var topology = line
+    topology = full
+    topology = threeD
     var algo = "gossip"
 
     if (args.length > 0) {
@@ -41,6 +45,13 @@ object Project2 {
       topology = args(1)
       algo = args(2)
     }
+
+    if (topology.equals(threeD) || topology.equals(imp3D)) {
+      print("\n3D topology detected. Updating number of nodes from " + numNodes)
+      numNodes = (math.pow(math.ceil(math.pow(numNodes.toDouble, 1.0 / 3.0)).toInt, 3)).toInt
+      print(" to " + numNodes + "\n")
+    }
+
     start(topology, algo, numNodes)
   }
 
@@ -51,15 +62,25 @@ object Project2 {
 
     printf("\nCreating %d actors in %s topology", numNodes, topology)
 
+    var fullNetwork = range(0, numNodes - 1).toBuffer
+
     for (i <- 0 to numNodes - 1) {
       var actor = system.actorOf(Props(new ActorNode(namingPrefix, algo, topology)), actorNamePrefix + i);
 
       if (topology.equals(line)) {
+
         var neighs = new Array[Int](2)
-        neighs = if (i == 0) Array(1)
-        else if (i == numNodes - 1) Array(i - 1)
-        else Array(i - 1, i + 1)
-        actor ! setNeighbours(neighs);
+        neighs = if (i == 0) Array(1) else if (i == numNodes - 1) Array(i - 1) else Array(i - 1, i + 1)
+        actor ! setNeighbours(neighs)
+
+      } else if (topology.equals(full)) {
+
+        var neighs = { if (i == 0) range(1, numNodes) else if (i == numNodes - 1) range(0, numNodes - 1) else range(0, i) ++ range(i + 1, numNodes) }
+        actor ! setNeighbours(neighs)
+
+      } else if (topology.equals(threeD)) {
+        var neighs = getNeighboursIn3d(numNodes, i)
+        actor ! setNeighbours(neighs)
       }
 
       printf("\n Created actor %s", actor.path.name);
@@ -70,11 +91,53 @@ object Project2 {
     printf("Build topology time taken : " + (System.currentTimeMillis() - startTime))
     startTime = System.currentTimeMillis();
 
-    var actorRef = actors(1)
+    var actorRef = actors(randActorIndex)
     println(">>>>" + actorRef.path.name)
-    actorRef ! printNeighbours()
+    //actorRef ! printNeighbours()
     actorRef ! gossipMsg("Fire in the hole!!")
 
+  }
+
+  def getNeighboursIn3d(numNodes: Int, ind: Int): Array[Int] = {
+
+    var index = ind + 1
+    var n = math.ceil(math.pow(numNodes.toDouble, 1.0 / 3.0)).toInt
+    var nsquare = (math.pow(n, 2)).toInt
+
+    var neighs = new ArrayBuffer[Int]()
+
+    var isLeft = (((index % nsquare) % n == 1));
+    var isRight = ((index % nsquare) % n == 0);
+    var isFront = ((index / nsquare) == 0)
+    var isBottom = ((((((index % nsquare) / n).toInt == n - 1) && ((index % nsquare) % n).toInt > 0)) || (index % nsquare) == 0)
+    var isTop = (((index % nsquare) / n == 0) && ((index % nsquare) % n > 0)) || ((index % nsquare) == n)
+    var isBack = (((index / nsquare) == n - 1) && ((index % nsquare) > 0))
+
+    var range = 1 until (math.pow(n, 3) + 1).toInt
+    // Left neighbor
+    if (!isLeft && (range contains index - 1)) neighs += (index - 1)
+    // Right neighbor
+    if (!isRight && (range contains index + 1)) neighs += (index + 1)
+    // Top neighbor
+    if (!isTop && (range contains index - n)) neighs += (index - n)
+    // Bottom neighbor
+    if (!isBottom && (range contains index + n)) neighs += (index + n)
+    // Front neighbor
+    if (!isFront) {
+      var front = (index - math.pow(n, 2)).toInt
+      if (range contains front) neighs += (front)
+    }
+    // Back neighbor
+    if (!isBack) {
+      var back = (index + math.pow(n, 2)).toInt
+      if (range contains back) neighs += (back)
+    }
+    println("\n Index " + index + "Neighs " + neighs)
+
+    for (j <- 0 to neighs.size - 1) {
+      neighs(j) = neighs(j) - 1
+    }
+    neighs.toArray
   }
 
   class ActorNode(namingPrefix: String, algo: String, topology: String) extends Actor {
@@ -87,7 +150,8 @@ object Project2 {
     def receive = {
       case n: setNeighbours => {
         alphaNeighs = n.neighs
-        println("Neigh length : " + n.neighs.length + " alpha length : " + alphaNeighs.length)
+        // println("Neigh length : " + n.neighs.length + " alpha length : " + alphaNeighs.length)
+        //println("Me " + self.path.name + " neighbours : " + alphaNeighs.toBuffer)
         actorsMap += (self.path.name -> 0)
       }
       case pname: printName => {
@@ -104,19 +168,21 @@ object Project2 {
       case r: gossipMsg => {
         gossipCount += 1
         if (gossipCount <= maxGossipCount) {
-          printf("\nReceived message %s for the count : %d", self.path.name, gossipCount)
+          //printf("Received message %s for the count : %d from : %s ", self.path.name, gossipCount, sender.path.name)
 
           actorsMap(self.path.name) = gossipCount
           rumour = r.rumour
-          if (topology.equals(line)) {
-            //          var neighbour = actors(alphaNeighs(currentIndex % alphaNeighs.length))
-            var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
+          if (topology.equals(line) || topology.equals(full) || topology.equals(threeD)) {
+            // var neighbour = actors(alphaNeighs(currentIndex % alphaNeighs.length))
+            var x = Random.nextInt(alphaNeighs.length)
+            println("Neigh Size " + alphaNeighs.length + " ele " + x + " at " + alphaNeighs(x) + " actors size " + actors.length + "\n")
+            var neighbour = actors(alphaNeighs(x))
             currentIndex = currentIndex + 1;
             neighbour ! gossipMsg(rumour)
           }
 
           if (gossipCount == maxGossipCount) {
-            convergedActors.append(self)
+            convergedActors += self
             if (convergedActors.length >= (actors.length / 2) - 1) {
               terminate()
               context.system.shutdown()
@@ -125,7 +191,7 @@ object Project2 {
 
         } else {
           printf("\nConverged message %s for the count : %d", self.path.name, gossipCount)
-          println(actorsMap.toString())
+          println(actorsMap.toSeq.sorted.toString())
         }
       }
 
@@ -143,7 +209,7 @@ object Project2 {
 
   def terminate(): Unit = {
     println("Time taken for protocol to converge : " + (System.currentTimeMillis() - startTime))
-    println(actorsMap.toString())
+    println(actorsMap.toSeq.sorted.toString())
   }
 
 }
