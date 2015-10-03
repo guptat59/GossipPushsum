@@ -5,6 +5,7 @@ import akka.actor.ActorRef
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import scala.Array._
+import scala.collection.mutable.HashMap
 
 object Project2 {
 
@@ -24,9 +25,9 @@ object Project2 {
 
   var actors = new ArrayBuffer[ActorRef]()
   var convergedActors = new ArrayBuffer[ActorRef]()
-  val actorsMap = new collection.mutable.HashMap[String, Int]
+  val actorsMap = new HashMap[String, String]
 
-  val actorNamePrefix = "tarun"
+  val actorNamePrefix = "dosGossip"
   val defaultSum = 10.0
   val maxGossipCount = 200
   var randActorIndex = 13
@@ -178,11 +179,13 @@ object Project2 {
     var lastSumEstimate = 0.0
     var consecutiveDiffCounter = 0
 
+    var isConverged = false
+
     def receive = {
       case n: setNeighbours => {
         alphaNeighs = n.neighs
         //println("Me " + self.path.name + " neighbours : " + alphaNeighs.toBuffer)
-        actorsMap += (self.path.name -> 0)
+        actorsMap += (self.path.name -> 0.toString())
         var y = self.path.name.split(actorNamePrefix)
         sum = defaultSum + y(y.length - 1).toDouble
       }
@@ -192,7 +195,7 @@ object Project2 {
         if (gossipCount <= maxGossipCount) {
           printf("Received message %s for the count : %d from : %s ", self.path.name, gossipCount, sender.path.name)
 
-          actorsMap(self.path.name) = gossipCount
+          actorsMap(self.path.name) = gossipCount.toString()
           rumour = r.rumour
 
           // var neighbour = actors(alphaNeighs(currentIndex % alphaNeighs.length))
@@ -202,8 +205,9 @@ object Project2 {
           neighbour ! gossipMsg(rumour)
 
         } else {
-          printf("\nConverged message %s for the count : %d", self.path.name, gossipCount)
-          println(actorsMap.toSeq.sorted.toString())
+          printf("\nGossip Converged message %s for the count : %d", self.path.name, gossipCount)
+          terminate(gossip)
+          context.system.shutdown()
         }
       }
 
@@ -218,28 +222,37 @@ object Project2 {
 
       case p: pushsumMsg => {
 
-        // add received pair to own corresponding values 
-        sum += p.s
-        weight += p.w
+        if (!isConverged) {
+          println(self.path.name + "Received (s,w) = (" + p.s + "," + p.w + ") from " + sender.path.name)
+          // add received pair to own corresponding values 
+          sum += p.s
+          weight += p.w
 
-        var ratio = sum / weight;
-        if (math.abs(ratio - lastSumEstimate) <= sumEstConvRatio) {
-          consecutiveDiffCounter += 1
-        } else {
-          consecutiveDiffCounter = 0
+          var ratio = sum / weight;
+          if (math.abs(ratio - lastSumEstimate) <= sumEstConvRatio) {
+            consecutiveDiffCounter += 1
+            if (consecutiveDiffCounter >= 3) {
+              isConverged = true
+              println("Push sum converged first at" + self.path.name)
+              terminate(pushsum)
+              context.system.shutdown()
+            }
+          } else {
+            consecutiveDiffCounter = 0
+          }
+
+          // half of s and w is kept by the sending actor
+          sum = sum / 2
+          weight = weight / 2
+
+          actorsMap(self.path.name) = sum + " , " + weight + " , " + lastSumEstimate
+          // This will be referred next time
+          lastSumEstimate = sum / weight
+
+          // Half is placed in the message. 
+          var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
+          neighbour ! pushsumMsg(sum, weight)
         }
-
-        // half of s and w is kept by the sending actor
-        sum = sum / 2
-        weight = weight / 2
-
-        // This will be referred next time
-        lastSumEstimate = sum / weight
-
-        // Half is placed in the message. 
-        var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
-        neighbour ! pushsumMsg(sum, weight)
-
       }
 
       case x: String => {
@@ -258,9 +271,14 @@ object Project2 {
     }
   }
 
-  def terminate(): Unit = {
+  def terminate(algo: String): Unit = {
     println("Time taken for protocol to converge : " + (System.currentTimeMillis() - startTime))
     println(actorsMap.toSeq.sorted.toString())
+    if (algo.equals(gossip)) {
+
+    } else {
+
+    }
   }
 
 }
