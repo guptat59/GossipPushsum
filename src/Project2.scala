@@ -17,20 +17,24 @@ object Project2 {
 
   sealed trait Seal
   case class setNeighbours(neighs: Array[Int]) extends Seal
-  case class printNeighbours() extends Seal
-  case class printName() extends Seal
-  case class pushsumMsg() extends Seal
+  case class pushsumMsg(s: Double, w: Double) extends Seal
   case class gossipMsg(rumour: String) extends Seal
-  case class startGossip() extends Seal
+  case class startPush() extends Seal
+  case class initWeightNSum(s: Double, w: Double) extends Seal
 
   var actors = new ArrayBuffer[ActorRef]()
   var convergedActors = new ArrayBuffer[ActorRef]()
   val actorsMap = new collection.mutable.HashMap[String, Int]
 
   val actorNamePrefix = "tarun"
+  val defaultSum = 10.0
   val maxGossipCount = 200
   var randActorIndex = 13
   var startTime = System.currentTimeMillis()
+
+  val printName = "printName"
+  val printNeighbours = "printNeighbours"
+  var sumEstConvRatio = 0.0000000001
 
   def main(args: Array[String]): Unit = {
 
@@ -39,7 +43,8 @@ object Project2 {
     topology = full
     topology = threeD
     topology = imp3D
-    var algo = "gossip"
+    var algo = gossip
+    algo = pushsum
 
     if (args.length > 0) {
       numNodes = args(0).toInt
@@ -101,8 +106,15 @@ object Project2 {
 
     var actorRef = actors(randActorIndex)
     println(">>>>" + actorRef.path.name)
-    actorRef ! printNeighbours()
-    actorRef ! gossipMsg("Fire in the hole!!")
+    actorRef ! printNeighbours
+
+    if (algo.equals(gossip)) {
+      println("\nStarting gossip\n")
+      actorRef ! gossipMsg("Fire in the hole!!")
+    } else {
+      println("\nStarting push sum\n")
+      actorRef ! startPush()
+    }
 
   }
 
@@ -159,26 +171,22 @@ object Project2 {
     var alphaNeighs = Array[Int]()
     var currentIndex = 0
     var gossipCount = 0
-    var rumour = "";
+    var rumour = ""
+    var sum = 0.0
+    var weight = 1.0
+
+    var lastSumEstimate = 0.0
+    var consecutiveDiffCounter = 0
 
     def receive = {
       case n: setNeighbours => {
         alphaNeighs = n.neighs
-        // println("Neigh length : " + n.neighs.length + " alpha length : " + alphaNeighs.length)
         //println("Me " + self.path.name + " neighbours : " + alphaNeighs.toBuffer)
         actorsMap += (self.path.name -> 0)
+        var y = self.path.name.split(actorNamePrefix)
+        sum = defaultSum + y(y.length - 1).toDouble
       }
-      case pname: printName => {
-        print("##" + self.path.name)
-      }
-      case pn: printNeighbours => {
-        println("My name : " + self.path.name)
-        print("and my neighbours are ")
-        for (i <- 0 to alphaNeighs.length - 1) {
-          val p = context.actorSelection(namingPrefix + "user/" + actorNamePrefix + alphaNeighs(i));
-          p.tell(printName(), self)
-        }
-      }
+
       case r: gossipMsg => {
         gossipCount += 1
         if (gossipCount <= maxGossipCount) {
@@ -189,18 +197,9 @@ object Project2 {
 
           // var neighbour = actors(alphaNeighs(currentIndex % alphaNeighs.length))
           var x = Random.nextInt(alphaNeighs.length)
-          //println("Neigh Size " + alphaNeighs.length + " ele " + x + " at " + alphaNeighs(x) + " actors size " + actors.length + "\n")
           var neighbour = actors(alphaNeighs(x))
           currentIndex = currentIndex + 1;
           neighbour ! gossipMsg(rumour)
-
-          if (gossipCount == maxGossipCount) {
-            convergedActors += self
-            if (convergedActors.length >= (actors.length / 2) - 1) {
-              terminate()
-              context.system.shutdown()
-            }
-          }
 
         } else {
           printf("\nConverged message %s for the count : %d", self.path.name, gossipCount)
@@ -208,13 +207,52 @@ object Project2 {
         }
       }
 
-      case x: String => {
-        if (x != self.path.name) {
-          print(self.path.name + "called by " + x);
-          val p = context.actorSelection(namingPrefix + x);
-          print(p.pathString);
+      case sp: startPush => {
+        var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
+        // half of s and w is kept by the sending actor
+        sum = sum / 2
+        weight = weight / 2
+
+        neighbour ! pushsumMsg(sum, weight)
+      }
+
+      case p: pushsumMsg => {
+
+        // add received pair to own corresponding values 
+        sum += p.s
+        weight += p.w
+
+        var ratio = sum / weight;
+        if (math.abs(ratio - lastSumEstimate) <= sumEstConvRatio) {
+          consecutiveDiffCounter += 1
         } else {
-          print("both are equal")
+          consecutiveDiffCounter = 0
+        }
+
+        // half of s and w is kept by the sending actor
+        sum = sum / 2
+        weight = weight / 2
+
+        // This will be referred next time
+        lastSumEstimate = sum / weight
+
+        // Half is placed in the message. 
+        var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
+        neighbour ! pushsumMsg(sum, weight)
+
+      }
+
+      case x: String => {
+        if (x.equals(printName)) {
+          print("##" + self.path.name)
+        } else if (x.equals(printNeighbours)) {
+
+          println("My name : " + self.path.name)
+          print("and my neighbours are ")
+          for (i <- 0 to alphaNeighs.length - 1) {
+            val p = context.actorSelection(namingPrefix + "user/" + actorNamePrefix + alphaNeighs(i));
+            p.tell(printName, self)
+          }
         }
       }
     }
