@@ -112,6 +112,7 @@ object Project2 {
     var isBottom = ((((((index % nsquare) / n).toInt == n - 1) && ((index % nsquare) % n).toInt > 0)) || (index % nsquare) == 0)
     var isTop = (((index % nsquare) / n == 0) && ((index % nsquare) % n > 0)) || ((index % nsquare) == n)
     var isBack = (((index / nsquare) == n - 1) && ((index % nsquare) > 0))
+    
 
     var range = 1 until (math.pow(n, 3) + 1).toInt
     // Left neighbor
