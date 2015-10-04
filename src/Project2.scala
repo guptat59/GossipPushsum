@@ -6,6 +6,10 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
 import scala.Array._
 import scala.collection.mutable.HashMap
+import scala.concurrent.impl.Future
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
+import scala.concurrent.Await
 
 object Project2 {
 
@@ -15,36 +19,43 @@ object Project2 {
   val threeD = "3d"
   val full = "full"
   val imp3D = "imp3d"
-  
+
   sealed trait Seal
   case class setNeighbours(neighs: Array[Int]) extends Seal
   case class pushsumMsg(s: Double, w: Double) extends Seal
   case class gossipMsg(rumour: String) extends Seal
   case class startPush() extends Seal
+  case class gossipMsgBroadcast() extends Seal
   case class initWeightNSum(s: Double, w: Double) extends Seal
 
   var actors = new ArrayBuffer[ActorRef]()
   var convergedActors = new ArrayBuffer[ActorRef]()
   val actorsMap = new HashMap[String, String]
-  var coOrdinates:Map[Int,Array[Int]]= Map();
+  var convergedActorsCount = 0
+  var coOrdinates: Map[Int, Array[Int]] = Map();
 
-  val actorNamePrefix = "dosGossip"
+  val actorNamePrefix = "storm"
   val defaultSum = 10.0
-  val maxGossipCount = 200
+  val maxGossipCount = 100
   var randActorIndex = 17
   var startTime = System.currentTimeMillis()
+  var lastConvergedTime = System.currentTimeMillis()
+  var atleastOneConverged = false
 
   val printName = "printName"
   val printNeighbours = "printNeighbours"
   var sumEstConvRatio = 0.0000000001
 
+  var lastTimeStamp = System.currentTimeMillis()
+  var curTimeStamp = System.currentTimeMillis()
+
   def main(args: Array[String]): Unit = {
 
-    var numNodes = 20
+    var numNodes = 900
     var topology = line
-    topology = full
-    topology = threeD
-   // topology = imp3D
+    //topology = full
+    //topology = threeD
+    //topology = imp3D
     var algo = gossip
     //algo = pushsum
 
@@ -55,20 +66,15 @@ object Project2 {
     }
 
     if (topology.equals(threeD) || topology.equals(imp3D)) {
-      print("\n3D topology detected. Updating number of nodes from " + numNodes)
+      //finding nearest cube-root
       numNodes = (math.pow(math.ceil(math.pow(numNodes.toDouble, 1.0 / 3.0)).toInt, 3)).toInt
-      print(" to " + numNodes + "\n")
     }
-
     start(topology, algo, numNodes)
   }
 
   def start(topology: String, algo: String, numNodes: Int): Unit = {
-
     val system = ActorSystem("ActorSys")
     val namingPrefix: String = "akka://ActorSys/"
-
-    printf("\nCreating %d actors in %s topology", numNodes, topology)
 
     var fullNetwork = range(0, numNodes - 1).toBuffer
 
@@ -97,12 +103,8 @@ object Project2 {
         actor ! setNeighbours(neighs.toArray)
 
       }
-
-      printf("\n Created actor %s", actor.path.name);
       actors += actor
     }
-    printf("\nCreated %d actors in %s topology", actors.length, topology)
-
     printf("Build topology time taken : " + (System.currentTimeMillis() - startTime))
     startTime = System.currentTimeMillis();
 
@@ -117,6 +119,31 @@ object Project2 {
       println("\nStarting push sum\n")
       actorRef ! startPush()
     }
+    Thread.sleep(100)
+    printf(actorRef.path.name)
+    system.stop(actorRef)
+
+    var isTerminated = false
+    var monitor = new Thread {
+      override def run() {
+        while (!isTerminated) {
+          printf("Monitor is running : " + convergedActorsCount)
+          if (convergedActorsCount > 0) {
+            if (math.abs(System.currentTimeMillis() - curTimeStamp) > 1000) {
+              println("\n#$%@#$% Actors converged : " + convergedActorsCount)
+              println("\n$$%%Time taken for protocol to converge : " + (curTimeStamp - startTime))
+              println(actorsMap.toSeq.sorted.toString())
+              system.shutdown()
+              isTerminated = true;
+              System.exit(0)
+            }
+          }
+          Thread.sleep(5000)
+        }
+      }
+    }
+
+    monitor.start()
 
   }
 
@@ -127,56 +154,47 @@ object Project2 {
   }
 
   def getNeighboursIn3d(numNodes: Int, value: Int): ArrayBuffer[Int] = {
-  
+
     var n = math.ceil(math.pow(numNodes.toDouble, 1.0 / 3.0)).toInt
     var A = construct3DGrid(n)
     var index = coOrdinates.get(value);
     var i = index.get(0)
     var j = index.get(1)
     var k = index.get(2)
-    
+
     var neighs = new ArrayBuffer[Int]()
-    
-    if(i+1 < n)
-    {
-      neighs.append(A(i+1)(j)(k));
+
+    if (i + 1 < n) {
+      neighs.append(A(i + 1)(j)(k));
     }
-    if(i-1 > -1 )
-    {
-      neighs.append(A(i-1)(j)(k));
+    if (i - 1 > -1) {
+      neighs.append(A(i - 1)(j)(k));
     }
-    if(j+1 < n )
-    {
-      neighs.append(A(i)(j+1)(k));
+    if (j + 1 < n) {
+      neighs.append(A(i)(j + 1)(k));
     }
-    if(j-1 > -1 )
-    {
-      neighs.append(A(i)(j-1)(k));
+    if (j - 1 > -1) {
+      neighs.append(A(i)(j - 1)(k));
     }
-    if(k+1 < n )
-    {
-      neighs.append(A(i)(j)(k+1));
+    if (k + 1 < n) {
+      neighs.append(A(i)(j)(k + 1));
     }
-    if(k-1 > -1 )
-    {
-      neighs.append(A(i)(j)(k-1));
+    if (k - 1 > -1) {
+      neighs.append(A(i)(j)(k - 1));
     }
     neighs
   }
 
   def construct3DGrid(n: Int): Array[Array[Array[Int]]] = {
-    
-    var A = Array.ofDim[Int](n,n,n);
-    
+
+    var A = Array.ofDim[Int](n, n, n);
+
     var count = 0;
-    for( i <- 0 to n-1)
-    {
-      for(j <- 0 to n-1 )
-      {
-        for(k <- 0 to n-1)
-        {
+    for (i <- 0 to n - 1) {
+      for (j <- 0 to n - 1) {
+        for (k <- 0 to n - 1) {
           A(i)(j)(k) = count
-          var arr = Array(i,j,k)
+          var arr = Array(i, j, k)
           coOrdinates += (count -> arr)
           count = count + 1
         }
@@ -208,39 +226,65 @@ object Project2 {
       }
 
       case r: gossipMsg => {
-        gossipCount += 1
-        if (gossipCount <= maxGossipCount) {
-          printf("\n Received message %s for the count : %d from : %s ", self.path.name, gossipCount, sender.path.name)
+        if (!isConverged) {
+          curTimeStamp = System.currentTimeMillis()
+          if (gossipCount == 0) {
+            self ! gossipMsgBroadcast()
+          }
+          gossipCount += 1
+          if (gossipCount <= maxGossipCount) {
+            // printf("\n Received message %s for the count : %d from : %s ", self.path.name, gossipCount, sender.path.name)
 
-          actorsMap(self.path.name) = gossipCount.toString()
-          rumour = r.rumour
+            actorsMap(self.path.name) = gossipCount.toString()
+            rumour = r.rumour
 
-          // var neighbour = actors(alphaNeighs(currentIndex % alphaNeighs.length))
+            // var neighbour = actors(alphaNeighs(currentIndex % alphaNeighs.length))
+            var x = Random.nextInt(alphaNeighs.length)
+            var neighbour = actors(alphaNeighs(x))
+            currentIndex = currentIndex + 1;
+            neighbour ! gossipMsg(rumour)
+          } else {
+            isConverged = true
+            convergedActorsCount += 1
+            //printf("\nGossip Converged message %s for the count : %d", self.path.name, gossipCount)
+            //printf("\nConverged act count %d for actors count : %d", convergedActorsCount, actors.length)
+            terminate(gossip, context.system, self.path.name)
+          }
+        }
+      }
+      case rb: gossipMsgBroadcast => {
+        if (!isConverged) {
           var x = Random.nextInt(alphaNeighs.length)
           var neighbour = actors(alphaNeighs(x))
           currentIndex = currentIndex + 1;
           neighbour ! gossipMsg(rumour)
-
-        } else {
-          printf("\nGossip Converged message %s for the count : %d", self.path.name, gossipCount)
-          terminate(gossip)
-          context.system.shutdown()
+          var f = Future {
+            Thread.sleep(1)
+          }
+          f.onComplete { case x => self.tell(gossipMsgBroadcast(), self) }
         }
       }
 
       case sp: startPush => {
+
         var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
         // half of s and w is kept by the sending actor
         sum = sum / 2
         weight = weight / 2
 
         neighbour ! pushsumMsg(sum, weight)
+        if (!isConverged) {
+          var f = Future {
+            Thread.sleep(1)
+          }
+          f.onComplete { case x => self.tell(startPush(), self) }
+        }
       }
 
       case p: pushsumMsg => {
 
         if (!isConverged) {
-          println(self.path.name + "Received (s,w) = (" + p.s + "," + p.w + ") from " + sender.path.name)
+          // println(self.path.name + "Received (s,w) = (" + p.s + "," + p.w + ") from " + sender.path.name)
           // add received pair to own corresponding values 
           sum += p.s
           weight += p.w
@@ -250,8 +294,9 @@ object Project2 {
             consecutiveDiffCounter += 1
             if (consecutiveDiffCounter >= 3) {
               isConverged = true
-              println("Push sum converged first at" + self.path.name)
-              terminate(pushsum)
+              convergedActorsCount += 1
+              // println("Push sum converged first at" + self.path.name)
+              terminate(pushsum, context.system, self.path.name)
               context.system.shutdown()
             }
           } else {
@@ -269,6 +314,13 @@ object Project2 {
           // Half is placed in the message. 
           var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
           neighbour ! pushsumMsg(sum, weight)
+        } else {
+          isConverged = true
+          convergedActorsCount += 1
+          //printf("\nPush Sum Converged %s for the count : %d", self.path.name, lastSumEstimate)
+          //printf("\nConverged act count %d for actors count : %d", convergedActorsCount, actors.length)
+          terminate(pushsum, context.system, self.path.name)
+
         }
       }
 
@@ -276,9 +328,8 @@ object Project2 {
         if (x.equals(printName)) {
           print("##" + self.path.name)
         } else if (x.equals(printNeighbours)) {
-
-          println("\nMy name : " + self.path.name)
-          print("and my neighbours are ")
+          //println("\nMy name : " + self.path.name)
+          //print("and my neighbours are ")
           for (i <- 0 to alphaNeighs.length - 1) {
             val p = context.actorSelection(namingPrefix + "user/" + actorNamePrefix + alphaNeighs(i));
             p.tell(printName, self)
@@ -288,14 +339,32 @@ object Project2 {
     }
   }
 
-  def terminate(algo: String): Unit = {
-    println("Time taken for protocol to converge : " + (System.currentTimeMillis() - startTime))
-    println(actorsMap.toSeq.sorted.toString())
+  def terminate(algo: String, ctx: ActorSystem, name: String): Unit = {
+    var count = 0
     if (algo.equals(gossip)) {
-
-    } else {
-
+      var it = actorsMap.values.iterator
+      while (it.hasNext) {
+        count = count + it.next().toInt
+      }
+    }
+    //    var f = Future {
+    //      Thread.sleep(1000)
+    //    }
+    //    f.onComplete {
+    //      case x =>
+    //        if (math.abs(System.currentTimeMillis() - curTimeStamp) > 1000) {
+    //          println("Actors converged : " + convergedActorsCount)
+    //          println("\nTime taken for protocol to converge : " + (curTimeStamp - startTime))
+    //          ctx.shutdown()
+    //        }
+    //        Thread.sleep(5000)
+    //    }
+    if (convergedActorsCount >= (0.5) * actors.length) {
+      lastConvergedTime = System.currentTimeMillis()
+      //println("Actors converged : " + convergedActorsCount)
+      //println(actorsMap.toSeq.sorted.toString())
+      //println("\nTime taken for protocol to converge : " + (lastConvergedTime - startTime))
+      //ctx.shutdown()
     }
   }
-
 }
