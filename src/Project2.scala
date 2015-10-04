@@ -51,7 +51,7 @@ object Project2 {
 
   def main(args: Array[String]): Unit = {
 
-    var numNodes = 900
+    var numNodes = 8000
     var topology = line
     //topology = full
     //topology = threeD
@@ -142,9 +142,7 @@ object Project2 {
         }
       }
     }
-
     monitor.start()
-
   }
 
   def getRandomNeighbour(neighs: ArrayBuffer[Int], numNodes: Int): Int = {
@@ -248,7 +246,7 @@ object Project2 {
             convergedActorsCount += 1
             //printf("\nGossip Converged message %s for the count : %d", self.path.name, gossipCount)
             //printf("\nConverged act count %d for actors count : %d", convergedActorsCount, actors.length)
-            terminate(gossip, context.system, self.path.name)
+            lastConvergedTime = System.currentTimeMillis()
           }
         }
       }
@@ -296,7 +294,7 @@ object Project2 {
               isConverged = true
               convergedActorsCount += 1
               // println("Push sum converged first at" + self.path.name)
-              terminate(pushsum, context.system, self.path.name)
+              lastConvergedTime = System.currentTimeMillis()
               context.system.shutdown()
             }
           } else {
@@ -319,8 +317,7 @@ object Project2 {
           convergedActorsCount += 1
           //printf("\nPush Sum Converged %s for the count : %d", self.path.name, lastSumEstimate)
           //printf("\nConverged act count %d for actors count : %d", convergedActorsCount, actors.length)
-          terminate(pushsum, context.system, self.path.name)
-
+          lastConvergedTime = System.currentTimeMillis()
         }
       }
 
@@ -336,35 +333,6 @@ object Project2 {
           }
         }
       }
-    }
-  }
-
-  def terminate(algo: String, ctx: ActorSystem, name: String): Unit = {
-    var count = 0
-    if (algo.equals(gossip)) {
-      var it = actorsMap.values.iterator
-      while (it.hasNext) {
-        count = count + it.next().toInt
-      }
-    }
-    //    var f = Future {
-    //      Thread.sleep(1000)
-    //    }
-    //    f.onComplete {
-    //      case x =>
-    //        if (math.abs(System.currentTimeMillis() - curTimeStamp) > 1000) {
-    //          println("Actors converged : " + convergedActorsCount)
-    //          println("\nTime taken for protocol to converge : " + (curTimeStamp - startTime))
-    //          ctx.shutdown()
-    //        }
-    //        Thread.sleep(5000)
-    //    }
-    if (convergedActorsCount >= (0.5) * actors.length) {
-      lastConvergedTime = System.currentTimeMillis()
-      //println("Actors converged : " + convergedActorsCount)
-      //println(actorsMap.toSeq.sorted.toString())
-      //println("\nTime taken for protocol to converge : " + (lastConvergedTime - startTime))
-      //ctx.shutdown()
     }
   }
 }
