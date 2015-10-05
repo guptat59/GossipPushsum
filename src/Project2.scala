@@ -36,11 +36,12 @@ object Project2 {
 
   val actorNamePrefix = "storm"
   val defaultSum = 10.0
-  val maxGossipCount = 100
+  val maxGossipCount = 10
   var randActorIndex = 17
   var startTime = System.currentTimeMillis()
   var lastConvergedTime = System.currentTimeMillis()
   var atleastOneConverged = false
+  var isTerminated = false
 
   val printName = "printName"
   val printNeighbours = "printNeighbours"
@@ -51,13 +52,13 @@ object Project2 {
 
   def main(args: Array[String]): Unit = {
 
-    var numNodes = 8000
+    var numNodes = 15625
     var topology = line
-    //topology = full
+    topology = full
     //topology = threeD
     //topology = imp3D
     var algo = gossip
-    //algo = pushsum
+    algo = pushsum
 
     if (args.length > 0) {
       numNodes = args(0).toInt
@@ -121,18 +122,17 @@ object Project2 {
     }
     Thread.sleep(100)
     printf(actorRef.path.name)
-    system.stop(actorRef)
+    //system.stop(actorRef)
 
-    var isTerminated = false
     var monitor = new Thread {
       override def run() {
         while (!isTerminated) {
           printf("Monitor is running : " + convergedActorsCount)
           if (convergedActorsCount > 0) {
             if (math.abs(System.currentTimeMillis() - curTimeStamp) > 1000) {
-              println("\n#$%@#$% Actors converged : " + convergedActorsCount)
+              println("\n#$%@#$% Actors converged : " + convergedActorsCount + "/" + actors.size)
               println("\n$$%%Time taken for protocol to converge : " + (curTimeStamp - startTime))
-              println(actorsMap.toSeq.sorted.toString())
+              //println(actorsMap.toSeq.sorted.toString())
               system.shutdown()
               isTerminated = true;
               System.exit(0)
@@ -142,7 +142,9 @@ object Project2 {
         }
       }
     }
-    monitor.start()
+    if (algo.equals(gossip)) {
+      monitor.start()
+    }
   }
 
   def getRandomNeighbour(neighs: ArrayBuffer[Int], numNodes: Int): Int = {
@@ -271,12 +273,16 @@ object Project2 {
         weight = weight / 2
 
         neighbour ! pushsumMsg(sum, weight)
-        if (!isConverged) {
-          var f = Future {
-            Thread.sleep(1)
+
+        if (!topology.equals(line)) {
+          if (!isConverged) {
+            var f = Future {
+              Thread.sleep(1)
+            }
+            f.onComplete { case x => self.tell(startPush(), self) }
           }
-          f.onComplete { case x => self.tell(startPush(), self) }
         }
+
       }
 
       case p: pushsumMsg => {
@@ -290,12 +296,17 @@ object Project2 {
           var ratio = sum / weight;
           if (math.abs(ratio - lastSumEstimate) <= sumEstConvRatio) {
             consecutiveDiffCounter += 1
-            if (consecutiveDiffCounter >= 3) {
+            if (consecutiveDiffCounter >= 3 && (!isConverged)) {
               isConverged = true
-              convergedActorsCount += 1
-              // println("Push sum converged first at" + self.path.name)
-              lastConvergedTime = System.currentTimeMillis()
-              context.system.shutdown()
+              if (!isTerminated) {
+                isTerminated = true
+                convergedActorsCount += 1
+                // println("Push sum converged first at" + self.path.name)
+                lastConvergedTime = System.currentTimeMillis()
+                println(actorsMap.toSeq.sorted.toString())
+                println("\n$$%%Time taken for protocol to converge : " + (lastConvergedTime - startTime))
+                context.system.shutdown()
+              }
             }
           } else {
             consecutiveDiffCounter = 0
@@ -313,17 +324,19 @@ object Project2 {
           var neighbour = actors(alphaNeighs(Random.nextInt(alphaNeighs.length)))
           neighbour ! pushsumMsg(sum, weight)
         } else {
+
           isConverged = true
           convergedActorsCount += 1
           //printf("\nPush Sum Converged %s for the count : %d", self.path.name, lastSumEstimate)
           //printf("\nConverged act count %d for actors count : %d", convergedActorsCount, actors.length)
           lastConvergedTime = System.currentTimeMillis()
         }
+
       }
 
       case x: String => {
         if (x.equals(printName)) {
-          print("##" + self.path.name)
+          //print("##" + self.path.name)
         } else if (x.equals(printNeighbours)) {
           //println("\nMy name : " + self.path.name)
           //print("and my neighbours are ")
